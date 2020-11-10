@@ -1,0 +1,101 @@
+#include <linux/fb.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+ 
+ 
+typedef unsigned short WORD;
+typedef unsigned int DWORD;
+typedef unsigned long LONG;
+ 
+typedef struct tagBITMAPFILEHEADER
+{
+	WORD bfType;  
+	DWORD bfSize; 
+	WORD bfReserved1; 
+	WORD bfReserved2;
+	DWORD bfOffBits;
+} __attribute__((packed)) BITMAPFILEHEADER;
+ 
+ 
+typedef struct tagBITMAPINFOHEADER
+{
+	DWORD biSize;    
+	LONG biWidth;   
+	LONG biHeight;   
+	WORD biPlanes;   
+	WORD biBitCount;  
+	DWORD biCompression; 
+	DWORD biSizeImage;  
+	LONG biXPelsPerMeter; 
+	LONG biYPelsPerMeter; 
+	DWORD biClrUsed; 
+	DWORD biClrImportant;
+} __attribute__((packed)) BITMAPINFOHEADER;
+ 
+ 
+int main(int argc, char **argv)
+{
+	struct fb_fix_screeninfo finfo;
+	struct fb_var_screeninfo vinfo;
+ 
+	int fb_fd = open("/dev/fb0",O_RDWR);
+ 
+	ioctl(fb_fd, FBIOGET_VSCREENINFO, &vinfo);
+	ioctl(fb_fd, FBIOGET_FSCREENINFO, &finfo);
+ 
+	long screensize = vinfo.yres_virtual * finfo.line_length;
+	uint8_t *fbp = mmap(0, screensize, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, (off_t)0);
+	if(fbp == -1)
+	{
+		printf("mmap fails\n");
+		return -1;
+	}
+ 
+	BITMAPFILEHEADER    bmfh;
+	BITMAPINFOHEADER    bmih;
+ 
+ 
+    //create bitmap file header
+    ((unsigned char *)&bmfh.bfType)[0] = 'B';
+    ((unsigned char *)&bmfh.bfType)[1] = 'M';
+    bmfh.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + vinfo.xres * vinfo.yres * 4;
+    bmfh.bfReserved1 = 0;
+    bmfh.bfReserved2 = 0;
+    bmfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+ 
+ 
+    //create bitmap information header
+    bmih.biSize = sizeof(BITMAPINFOHEADER);
+    bmih.biWidth = vinfo.xres;
+    bmih.biHeight = vinfo.yres;
+    bmih.biPlanes = 1;
+    bmih.biBitCount = 32;
+    bmih.biCompression = 0;
+    bmih.biSizeImage = 0;
+    bmih.biXPelsPerMeter = 3800;
+    bmih.biYPelsPerMeter = 3800;
+    bmih.biClrUsed = 0;
+    bmih.biClrImportant = 0;
+ 
+ 
+	int image_file = open("screen.bmp", O_RDWR|O_CREAT);
+	write(image_file, &bmfh, sizeof(bmfh));
+	write(image_file, &bmih, sizeof(bmih));
+	
+	int x, y;
+	for(y = vinfo.yres - 1; y >= 0; y--)
+	{
+		for(x = 0; x < vinfo.xres; x++)
+		{
+			long location = (x + vinfo.xoffset) * (vinfo.bits_per_pixel/8) + (y + vinfo.yoffset) * finfo.line_length;			
+			write(image_file, fbp + location, 4);
+		}
+	}
+　　　　　munmap(fbp, screensize);
+	close(image_file);
+	close(fb_fd);	
+	return 0;
+}
